@@ -19,23 +19,38 @@ export function ErdDiagramRenderer({ diagram }: ErdDiagramRendererProps) {
         draggedTable: null,
         offset: { x: 0, y: 0 }
     });
+    const [zoom, setZoom] = useState(1); // Start at normal zoom
 
     // Initialize table positions on first load
     useEffect(() => {
         if (tablePositions.size === 0 && diagram.entities.length > 0) {
-            const cols = Math.min(8, Math.ceil(Math.sqrt(diagram.entities.length)));
-            const tableWidth = 200;
-            const tableHeight = 120;
-            const spacingX = 280;
-            const spacingY = 160;
+            // DYNAMIC calculation based on actual entity count
+            const entityCount = diagram.entities.length;
+            const tableWidth = 250;
+            const tableHeight = 150;
+            const spacingX = 300;
+            const spacingY = 200;
+            const padding = 50;
+
+            let cols, rows;
+            if (entityCount === 1) {
+                cols = 1;
+                rows = 1;
+            } else if (entityCount <= 4) {
+                cols = Math.min(2, entityCount);
+                rows = Math.ceil(entityCount / cols);
+            } else {
+                cols = Math.ceil(Math.sqrt(entityCount * 1.2)); // Slightly wider layout
+                rows = Math.ceil(entityCount / cols);
+            }
 
             const newPositions = new Map();
             diagram.entities.forEach((entity, index) => {
                 const row = Math.floor(index / cols);
                 const col = index % cols;
                 newPositions.set(entity.id, {
-                    x: col * spacingX + 50,
-                    y: row * spacingY + 50,
+                    x: col * spacingX + padding,
+                    y: row * spacingY + padding,
                     width: tableWidth,
                     height: tableHeight
                 });
@@ -44,15 +59,34 @@ export function ErdDiagramRenderer({ diagram }: ErdDiagramRendererProps) {
         }
     }, [diagram.entities, tablePositions.size]);
 
-    const { svgWidth, svgHeight, connections } = useMemo(() => {
-        // Calculate SVG dimensions
-        const cols = Math.min(8, Math.ceil(Math.sqrt(diagram.entities.length)));
-        const spacingX = 280;
-        const spacingY = 160;
-        const maxCol = Math.min(cols - 1, (diagram.entities.length - 1) % cols);
-        const maxRow = Math.floor((diagram.entities.length - 1) / cols);
-        const svgWidth = Math.max(1200, (maxCol + 1) * spacingX + 100);
-        const svgHeight = Math.max(800, (maxRow + 1) * spacingY + 100);
+    const { svgWidth, svgHeight, connections, optimalZoom } = useMemo(() => {
+        // Calculate actual content bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        for (const pos of tablePositions.values()) {
+            minX = Math.min(minX, pos.x);
+            minY = Math.min(minY, pos.y);
+            maxX = Math.max(maxX, pos.x + pos.width);
+            maxY = Math.max(maxY, pos.y + pos.height);
+        }
+
+        // Add padding around content
+        const padding = 100;
+        const contentWidth = maxX - minX + (2 * padding);
+        const contentHeight = maxY - minY + (2 * padding);
+
+        // Set minimum dimensions
+        const svgWidth = Math.max(contentWidth, 400);
+        const svgHeight = Math.max(contentHeight, 300);
+
+        // Calculate optimal zoom to fit content in viewport
+        const viewportWidth = 1000; // Approximate container width
+        const viewportHeight = 600; // Approximate container height
+        const optimalZoom = Math.min(
+            viewportWidth / svgWidth,
+            viewportHeight / svgHeight,
+            1.0 // Don't zoom in beyond 100%
+        );
 
         // Calculate connections based on current positions
         const connections = diagram.relations.map(relation => {
@@ -70,8 +104,15 @@ export function ErdDiagramRenderer({ diagram }: ErdDiagramRendererProps) {
             };
         }).filter(Boolean);
 
-        return { svgWidth, svgHeight, connections };
+        return { svgWidth, svgHeight, connections, optimalZoom };
     }, [diagram.relations, tablePositions]);
+
+    // Auto-fit zoom when positions change
+    useEffect(() => {
+        if (tablePositions.size > 0 && optimalZoom > 0) {
+            setZoom(optimalZoom);
+        }
+    }, [optimalZoom, tablePositions.size]);
 
     const getRelatedTables = (tableId: string) => {
         const related = new Set<string>();
@@ -135,6 +176,18 @@ export function ErdDiagramRenderer({ diagram }: ErdDiagramRendererProps) {
         });
     };
 
+    const handleZoomIn = () => {
+        setZoom(prev => Math.min(prev * 1.2, 2));
+    };
+
+    const handleZoomOut = () => {
+        setZoom(prev => Math.max(prev / 1.2, 0.1));
+    };
+
+    const handleFitToView = () => {
+        setZoom(optimalZoom > 0 ? optimalZoom : 1);
+    };
+
     if (diagram.entities.length === 0) {
         return (
             <div className="flex items-center justify-center h-96 bg-gray-50 rounded-lg">
@@ -163,13 +216,38 @@ export function ErdDiagramRenderer({ diagram }: ErdDiagramRendererProps) {
                 )}
             </div>
 
+            {/* Zoom Controls */}
+            <div className="flex items-center gap-2 mb-4">
+                <button
+                    onClick={handleZoomOut}
+                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                >
+                    Zoom Out
+                </button>
+                <button
+                    onClick={handleZoomIn}
+                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                >
+                    Zoom In
+                </button>
+                <button
+                    onClick={handleFitToView}
+                    className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                >
+                    Fit All Tables
+                </button>
+                <span className="text-sm text-gray-600 ml-2">
+                    Zoom: {Math.round(zoom * 100)}%
+                </span>
+            </div>
+
             {/* SVG Diagram */}
-            <div className="rounded-lg bg-white shadow p-4 overflow-auto" style={{ maxHeight: '800px' }}>
+            <div className="rounded-lg bg-white shadow p-4 overflow-auto" style={{ maxHeight: '80vh', width: '100%' }}>
                 <svg
-                    width={svgWidth}
-                    height={svgHeight}
-                    className="border border-gray-200"
-                    style={{ minWidth: '100%', minHeight: '600px' }}
+                    width={svgWidth * zoom}
+                    height={svgHeight * zoom}
+                    viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                    className="border border-gray-200 mx-auto block"
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
