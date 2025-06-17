@@ -20,3 +20,9 @@ export interface ErdDiagram {
     entities: ErdEntity[];
     relations: ErdRelation[];
 }
+
+
+export interface ParsedERD {
+    entities: ErdEntity[];
+    relations: ErdRelation[];
+}
